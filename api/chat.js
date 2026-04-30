@@ -1,7 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const fetch = require('node-fetch');
 
-// Koneksi Supabase
 const supabase = createClient(process.env.SB_URL, process.env.SB_KEY);
 
 module.exports = async (req, res) => {
@@ -15,18 +14,16 @@ module.exports = async (req, res) => {
 
     try {
         let contents = [];
-        if (image) {
-            // Mode Vision (Gambar + Teks)
+        if (image && image.includes(',')) {
             contents.push({
                 parts: [
-                    { text: "Nama kamu RAFAGPT buatan Rafa Fauzan Kamil (RAPX). Jawab dengan cerdas: " + message },
+                    { text: "Nama kamu RAFAGPT buatan RAPX. Jawab dengan cerdas: " + (message || "Analisis gambar ini") },
                     { inline_data: { mime_type: "image/jpeg", data: image.split(',')[1] } }
                 ]
             });
         } else {
-            // Mode Teks Biasa
             contents.push({
-                parts: [{ text: "Nama kamu RAFAGPT buatan Rafa Fauzan Kamil (RAPX). Jawab dengan cerdas: " + message }]
+                parts: [{ text: "Nama kamu RAFAGPT buatan RAPX. Jawab dengan cerdas: " + message }]
             });
         }
 
@@ -37,21 +34,31 @@ module.exports = async (req, res) => {
         });
 
         const data = await response.json();
-        
-        // Ambil hasil teks dari Gemini
+
+        // VALIDASI DATA (Mencegah Error reading '0')
+        if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
+            let errorMsg = "AI tidak bisa menjawab. ";
+            if (data.promptFeedback) errorMsg += "Konten diblokir oleh sistem keamanan Google.";
+            else if (data.error) errorMsg += data.error.message;
+            else errorMsg += "Coba ulangi beberapa saat lagi.";
+            
+            return res.status(200).json({ reply: errorMsg });
+        }
+
         const aiResponseText = data.candidates[0].content.parts[0].text;
 
         // Simpan log ke Supabase
-        await supabase.from('chat_logs').insert([{ 
-            user_id: userId || 'GUEST', 
-            message: message || "(Kirim Gambar)", 
-            response: aiResponseText 
-        }]);
+        try {
+            await supabase.from('chat_logs').insert([{ 
+                user_id: userId || 'GUEST', 
+                message: message || "(Kirim Gambar)", 
+                response: aiResponseText 
+            }]);
+        } catch (dbErr) { console.error("DB Error ignored"); }
 
-        // KIRIM DENGAN LABEL 'reply' (PENTING!)
         return res.status(200).json({ reply: aiResponseText });
 
     } catch (err) {
-        return res.status(500).json({ reply: "Sistem Error: " + err.message });
+        return res.status(200).json({ reply: "Sistem Error: " + err.message });
     }
 };
