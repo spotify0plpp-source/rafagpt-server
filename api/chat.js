@@ -1,70 +1,52 @@
 const { createClient } = require('@supabase/supabase-js');
 const fetch = require('node-fetch');
 
-// Inisialisasi Supabase menggunakan Environment Variables di Vercel
+// Setup Database Supabase
 const supabase = createClient(process.env.SB_URL, process.env.SB_KEY);
 
 module.exports = async (req, res) => {
-    // Pengaturan Izin Akses (CORS) agar bisa dipanggil dari Acode
+    // Izin Akses (CORS) agar bisa dipanggil dari Acode
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    // Menangani Preflight Request dari Browser
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: "Sistem hanya menerima metode POST." });
-    }
+    if (req.method === 'OPTIONS') return res.status(200).end();
 
     const { message, userId } = req.body;
 
     try {
-        // 1. Memanggil Otak AI (Claude 3 Haiku)
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
+        // PANGGIL MESIN GEMINI 1.5 (PINTER & GRATIS)
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_KEY}`, {
             method: 'POST',
-            headers: {
-                'x-api-key': process.env.CLAUDE_KEY,
-                'anthropic-version': '2023-06-01',
-                'content-type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: "claude-3-haiku-20240307",
-                max_tokens: 1024,
-                messages: [{ role: "user", content: message }]
+                contents: [{ 
+                    parts: [{ text: "Nama kamu adalah RAFAGPT, asisten AI pinter buatan Rafa Fauzan Kamil (RAPX). Jawablah setiap pertanyaan dengan formal, sopan, dan cerdas. Pertanyaan user: " + message }] 
+                }]
             })
         });
 
         const data = await response.json();
         
-        // Cek jika API Key Claude bermasalah
-        if (!data.content || !data.content[0]) {
-            throw new Error(data.error ? data.error.message : "Gagal mendapatkan respon dari AI.");
+        // Cek jika ada error dari Google
+        if (data.error) {
+            throw new Error(data.error.message);
         }
 
-        const aiReply = data.content[0].text;
+        const aiReply = data.candidates[0].content.parts[0].text;
 
-        // 2. Menyimpan Riwayat Chat ke Supabase (Database RAPX)
+        // Simpan log chat ke Supabase RAPX
         await supabase.from('chat_logs').insert([
-            { 
-                user_id: userId || 'GUEST_USER', 
-                message: message, 
-                response: aiReply,
-                created_at: new Date()
-            }
+            { user_id: userId || 'GUEST', message: message, response: aiReply }
         ]);
 
-        // 3. Mengirim Jawaban ke Tampilan Acode
         return res.status(200).json({ reply: aiReply });
 
     } catch (err) {
-        console.error("Internal Error:", err.message);
+        console.error(err);
         return res.status(500).json({ 
-            error: "Terjadi gangguan pada sistem saraf pusat AI.",
+            error: "Sistem AI Sedang Maintenance",
             details: err.message 
         });
     }
 };
-
