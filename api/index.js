@@ -1,29 +1,32 @@
-const { createClient } = require('@supabase/supabase-js');
 const fetch = require('node-fetch');
 
-const supabase = createClient(process.env.SB_URL, process.env.SB_KEY);
-
 module.exports = async (req, res) => {
+    // Header Wajib agar Acode tidak kena blokir
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
     if (req.method === 'OPTIONS') return res.status(200).end();
 
-    const { message, userId, image } = req.body;
-
     try {
+        const { message, image } = req.body || {};
+
+        // Cek apakah Key sudah terpasang
+        if (!process.env.GEMINI_KEY) {
+            return res.status(200).json({ reply: "Error: Variabel GEMINI_KEY belum dipasang di Vercel!" });
+        }
+
         let contents = [];
         if (image && image.includes(',')) {
             contents.push({
                 parts: [
-                    { text: "Nama kamu RAFAGPT buatan RAPX. Jawab dengan cerdas: " + (message || "Analisis gambar ini") },
+                    { text: "Nama kamu RAFAGPT buatan RAPX. " + (message || "Analisis gambar ini") },
                     { inline_data: { mime_type: "image/jpeg", data: image.split(',')[1] } }
                 ]
             });
         } else {
             contents.push({
-                parts: [{ text: "Nama kamu RAFAGPT buatan RAPX. Jawab dengan cerdas: " + message }]
+                parts: [{ text: "Nama kamu RAFAGPT buatan RAPX. " + (message || "Halo") }]
             });
         }
 
@@ -35,30 +38,16 @@ module.exports = async (req, res) => {
 
         const data = await response.json();
 
-        // VALIDASI DATA (Mencegah Error reading '0')
-        if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
-            let errorMsg = "AI tidak bisa menjawab. ";
-            if (data.promptFeedback) errorMsg += "Konten diblokir oleh sistem keamanan Google.";
-            else if (data.error) errorMsg += data.error.message;
-            else errorMsg += "Coba ulangi beberapa saat lagi.";
-            
-            return res.status(200).json({ reply: errorMsg });
+        // Cek apakah Google ngasih jawaban atau error
+        if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+            const aiReply = data.candidates[0].content.parts[0].text;
+            return res.status(200).json({ reply: aiReply });
+        } else {
+            return res.status(200).json({ reply: "Maaf, AI sedang overload atau API Key bermasalah." });
         }
 
-        const aiResponseText = data.candidates[0].content.parts[0].text;
-
-        // Simpan log ke Supabase
-        try {
-            await supabase.from('chat_logs').insert([{ 
-                user_id: userId || 'GUEST', 
-                message: message || "(Kirim Gambar)", 
-                response: aiResponseText 
-            }]);
-        } catch (dbErr) { console.error("DB Error ignored"); }
-
-        return res.status(200).json({ reply: aiResponseText });
-
     } catch (err) {
+        // Jika kodingan error, kirim pesan ini ke Acode, bukan 505
         return res.status(200).json({ reply: "Sistem Error: " + err.message });
     }
 };
